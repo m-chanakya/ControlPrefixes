@@ -24,18 +24,16 @@ class CustomInstall(install):
 # in the setup function:
 
 setup(
-    name="ControlPrefixes",
+    name="datatotext",
     version="0.1.0",
-    python_requires='>=3.7',
+    python_requires='>=3.6',
     install_requires=[
         "bert-score==0.3.5",
         "configargparse",
         "dataclasses",
         "datasets==1.1.2",
-        "h5py==2.10.0",
+        "h5py>=2.10.0",
         "fire",
-        "ipython==7.16.1",
-        "ipykernel==5.3.4",
         "pandas==1.1.3",
         "pyarrow==1.0.1",
         "pytorch-lightning==1.2.10",
@@ -50,13 +48,15 @@ setup(
         "sacrebleu",
         "wandb"
     ],
+    packages=['datatotext'],
+    package_dir={'datatotext': 'src/datatotext'},
     description="Code for Control Prefixes for Parameter-Efficient Text Generation",
     long_description=long_description,
     long_description_content_type="text/markdown",
     author="Jordan Clive",
     author_email="jordan.clive19@imperial.ac.uk",
-    url="https://github.com/jordiclive/ControlPrefixes",
-    download_url="https://github.com/jordiclive/ControlPrefixes.git",
+    url="https://github.com/m-chanakya/ControlPrefixes",
+    download_url="https://github.com/m-chanakya/ControlPrefixes.git",
     license="MIT License",
     cmdclass={'install': CustomInstall},
 )
