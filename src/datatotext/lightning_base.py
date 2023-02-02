@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import Any, Dict
 
 import pytorch_lightning as pl
-from callbacks import bespoke_scheduler
-from controlprefixes import ControlPrefixes
+from .callbacks import bespoke_scheduler
+from .controlprefixes import ControlPrefixes
 from pytorch_lightning.utilities import rank_zero_info
 from transformers import (
     AdamW,

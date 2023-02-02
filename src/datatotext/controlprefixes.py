@@ -1,6 +1,6 @@
 # from transformers import Trainer
 import torch
-from partial_embed import PartiallyFixedEmbedding
+from .partial_embed import PartiallyFixedEmbedding
 from torch import nn
 from transformers import PretrainedBartModel
 

@@ -10,12 +10,12 @@ import wandb
 import numpy as np
 import pytorch_lightning as pl
 import torch
-from callbacks import Seq2SeqLoggingCallback
-from lightning_base import PrefixTransformer, add_generic_args, generic_train  # noqa
-from partial_embed import make_new_embeddings_learnable
+from .callbacks import Seq2SeqLoggingCallback
+from .lightning_base import PrefixTransformer, add_generic_args, generic_train  # noqa
+from .partial_embed import make_new_embeddings_learnable
 from pytorch_lightning.utilities import rank_zero_info
 from torch.utils.data import DataLoader
-from utils import (
+from .utils import (
     Seq2SeqDataset,
     Seq2SeqDatasetSingle,
     assert_all_frozen,
