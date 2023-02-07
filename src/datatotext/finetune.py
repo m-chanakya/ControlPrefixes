@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import sys
 import argparse
 import logging
 import os
@@ -17,6 +18,7 @@ from pytorch_lightning.utilities import rank_zero_info
 from torch.utils.data import DataLoader
 from .utils import (
     Seq2SeqDataset,
+    Seq2SeqPredictionDataset,
     Seq2SeqDatasetSingle,
     assert_all_frozen,
     calculate_bleu,
@@ -467,6 +469,27 @@ class PrefixModule(PrefixTransformer):
     def calc_generative_metrics(self, preds, target) -> Dict:
         return calculate_bleu(preds, target)
 
+    def _predict(self, batch: dict) -> List[str]:
+        prefix_prompt = self.model.get_prompt(
+                bsz=len(batch["cats"]),
+                sample_size=self.eval_beams,
+                conditional_info={"cats": batch["cats"], "sources": batch["sources"]},
+            )
+        generated_ids = self.seq2seq_model.generate(
+            batch["input_ids"],
+            past_key_values=prefix_prompt,
+            attention_mask=batch["attention_mask"],
+            use_cache=True,
+            length_penalty=self.hparams.length_penalty,
+            use_prefix=True,
+            decoder_start_token_id=self.decoder_start_token_id,
+            num_beams=self.eval_beams,
+            min_length=self.eval_min_length,
+            max_length=self.eval_max_length,
+        )
+        preds: List[str] = self.ids_to_clean_text(generated_ids)
+        return preds
+
     def _generative_step(
         self, batch: dict, batch_idx=None, dataloader_idx=None
     ) -> dict:
@@ -496,7 +519,6 @@ class PrefixModule(PrefixTransformer):
             num_beams=self.eval_beams,
             min_length=self.eval_min_length,
             max_length=self.eval_max_length,
-            # no_repeat_ngram_size = 3
         )
         gen_time = (time.time() - t0) / batch["input_ids"].shape[0]
         preds: List[str] = self.ids_to_clean_text(generated_ids)
@@ -577,11 +599,18 @@ class PrefixModule(PrefixTransformer):
             bleu_info = eval_bleu(
                 self.hparams.data_dir, output_test_predictions_file, dataset_name
             )
+#            meteor_info = eval_meteor_test_webnlg(
+#                self.hparams.data_dir, output_test_predictions_file, dataset_name
+#            )
+#            chrf_info = eval_chrf_test_webnlg(
+#                self.hparams.data_dir, output_test_predictions_file, dataset_name
+#            )
+
             meteor_info = eval_meteor_test_webnlg(
-                self.hparams.data_dir, output_test_predictions_file, dataset_name
+                self.hparams.data_dir, output_test_predictions_file, output_test_targets_file
             )
             chrf_info = eval_chrf_test_webnlg(
-                self.hparams.data_dir, output_test_predictions_file, dataset_name
+                self.hparams.data_dir, output_test_predictions_file, output_test_targets_file
             )
 
             print(f" %s - bleu_info: %s", dataset_name, bleu_info)
@@ -599,6 +628,15 @@ class PrefixModule(PrefixTransformer):
             self.tokenizer,
             type_path=type_path,
             n_obs=n_obs,
+            max_target_length=max_target_length,
+            **self.dataset_kwargs,
+        )
+        return dataset
+
+    def get_prediction_dataset(self, inputs, max_target_length):
+        dataset = Seq2SeqPredictionDataset(
+            self.tokenizer,
+            inputs=inputs,
             max_target_length=max_target_length,
             **self.dataset_kwargs,
         )
@@ -854,6 +892,51 @@ def eval(args, model=None):
             rank_zero_info(preds, file=f)
 
 
+
+def predict(args, model, dataloader):
+    rank_zero_info("Predicting...")
+    with torch.no_grad():
+        model.eval()
+        model = model.cuda()
+
+        preds = []
+        for batch in dataloader:
+            batch = model.transfer_batch_to_device(batch, model.device)
+            preds.extend(model._predict(batch))
+        return preds
+
+
+def predict_main(args, model=None):
+    print("In predict_main")
+    # Prepare model
+    if model is None:
+        if "datatotext" in args.task_mode:
+            if args.tuning_mode == "prefixtune":
+                model = PrefixModule(args)
+
+    trainer: pl.Trainer = generic_train(
+        model,
+        args,
+        logging_callback=Seq2SeqLoggingCallback(),
+        ckpt_path=args.test_checkpoint,
+    )
+
+    # Prepare dataset
+    inputs = [
+        "<H> Hardy's Fish & Chicken Crete (southern / soul food restaurant) <R> restaurant type <T> southern / soul food restaurant <H> Hardy's Fish & Chicken Crete (southern / soul food restaurant) <R> southern / soul food restaurant adjective <T> hidden gem <H> Hardy's Fish & Chicken Crete (southern / soul food restaurant) <R> known for <T> generous portions <H> Hardy's Fish & Chicken Crete (southern / soul food restaurant) <R> most popular item(s) served <T> Chicken Wings (Whole Wings) and Mixed Chicken (by the piece)",
+"<H> SEOULSPICE (korean restaurant) <R> restaurant type <T> korean restaurant <H> SEOULSPICE (korean restaurant) <R> korean restaurant adjective <T> no-frills <H> SEOULSPICE (korean restaurant) <R> neighborhood name <T> NoMa <H> SEOULSPICE (korean restaurant) <R> known for <T> large portions <H> SEOULSPICE (korean restaurant) <R> most popular item(s) served <T> RICE BOWL and NOODLES",
+"<H> Tropilyz Restaurant - Harlem (latin american restaurant) <R> restaurant type <T> latin american restaurant <H> Tropilyz Restaurant - Harlem (latin american restaurant) <R> latin american restaurant adjective <T> fast casual <H> Tropilyz Restaurant - Harlem (latin american restaurant) <R> neighborhood name <T> Central Harlem <H> Tropilyz Restaurant - Harlem (latin american restaurant) <R> known for <T> authentic dishes <H> Tropilyz Restaurant - Harlem (latin american restaurant) <R> most popular item(s) served <T> Combo One and Tostones",
+        "<H> Luella’s Bar-B-Que  (bbq joint) <R> is a <T> bbq joint <H> Luella’s Bar-B-Que  (bbq joint) <R> bbq joint adjective <T> classic <H> Luella’s Bar-B-Que  (bbq joint) <R> restaurant type <T> BBQ <H> Luella’s Bar-B-Que  (bbq joint) <R> known for <T> customizable options <H> Luella’s Bar-B-Que  (bbq joint) <R> most popular item(s) served <T> Two Meat Combo Plate and Chopped Pork BBQ Plate <H> Luella’s Bar-B-Que  (bbq joint) <R> food made with <T> delicious sauces",
+"<H> Pleiku (tapas restaurant) <R> restaurant type <T> tapas restaurant <H> Pleiku (tapas restaurant) <R> tapas restaurant adjective <T> upscale <H> Pleiku (tapas restaurant) <R> neighborhood name <T> Clark Learning Office Center <H> Pleiku (tapas restaurant) <R> known for <T> generous portions <H> Pleiku (tapas restaurant) <R> most popular item(s) served <T> Pho Tai and Fresh Spring Rolls",
+"<H> Mama's Pizza - Arlington (pizza place) <R> is a <T> pizza place <H> Mama's Pizza - Arlington (pizza place) <R> pizza place adjective <T> hole-in-the-wall atmosphere/style <H> Mama's Pizza - Arlington (pizza place) <R> restaurant type <T> Pizza <H> Mama's Pizza - Arlington (pizza place) <R> known for <T> authentic dishes <H> Mama's Pizza - Arlington (pizza place) <R> most popular item(s) served <T> Cheese Pizza and Combo Pizza"
+    ]
+
+    dataset = model.get_prediction_dataset(inputs, args.max_target_length)
+    dataloader = torch.utils.data.DataLoader(dataset, collate_fn=dataset.collate_fn, batch_size=args.train_batch_size, num_workers=0)
+    for pred in predict(args, model, dataloader):
+        print("Predicted Text:", pred)
+
+
 def main(args, model=None):
     # if os.path.exists(args.output_dir):
     #     raise ValueError("--Previous Experiment, delete folder if want to overwrite")
@@ -886,7 +969,7 @@ def main(args, model=None):
             id=id_, name=args.wb_name, project=args.wb_project, entity=args.wb_entity
         )
 
-    if args.skip_train:
+    if args.skip_train and args.test_checkpoint is None:
         print("ES", model.model.es.trainable_weight)
         print("Seq", model.seq2seq_model.shared.trainable_weight)
         model.seq2seq_model.shared.trainable_weight = model.model.es.trainable_weight
@@ -900,6 +983,7 @@ def main(args, model=None):
         args,
         logging_callback=Seq2SeqLoggingCallback(),
         logger=logger,
+        ckpt_path=args.test_checkpoint,
     )
     pickle_save(model.hparams, model.output_dir / "hparams.pkl")
 
@@ -915,7 +999,8 @@ def main(args, model=None):
             checkpoint = checkpoints[-1]
             rank_zero_info(checkpoint)
 
-            trainer.test(model, ckpt_path=checkpoint)
+            err = trainer.test(model) #, ckpt_path=checkpoint)
+            print("Test errors:", err)
             return model
 
     trainer.test()
@@ -928,5 +1013,9 @@ if __name__ == "__main__":
     parser = PrefixModule.add_model_specific_args(parser, os.getcwd())
     args = parser.parse_args()
     pl.seed_everything(args.seed)
+    print("Args:", args)
 
-    model = main(args)
+#     model = main(args)
+    if args.do_predict:
+        predict_main(args)
+        sys.exit()

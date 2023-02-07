@@ -12,7 +12,7 @@ import torch
 import torch.distributed as dist
 from sacrebleu import corpus_bleu
 from torch import nn
-from torch.utils.data import Dataset, Sampler
+from torch.utils.data import Dataset, Sampler, IterableDataset
 from transformers import BartTokenizer
 from transformers.file_utils import cached_property
 
@@ -192,6 +192,64 @@ class Seq2SeqDataset(AbstractSeq2SeqDataset):
         ).data
         # lens = (batch_encoding['attention_mask'] == 1.).sum(dim=1).tolist()
 
+        batch_encoding["ids"] = torch.tensor([x["id"] for x in batch])
+        batch_encoding["cats"] = torch.tensor([x["category"] for x in batch])
+        batch_encoding["sources"] = torch.tensor([x["source"] for x in batch])
+
+        return batch_encoding
+
+
+class Seq2SeqPredictionDataset(Dataset):
+    def __init__(
+        self,
+        tokenizer,
+        inputs,
+        max_source_length,
+        max_target_length,
+        prefix="",
+        **dataset_kwargs,
+    ):
+        super().__init__()
+        self.tokenizer = tokenizer
+        self.inputs = inputs
+        self.src_lens = [len(x) for x in self.inputs]
+        self.max_source_length = max_source_length
+        self.max_target_length = max_target_length
+        self.prefix = prefix if prefix is not None else ""
+        self.pad_token_id = self.tokenizer.pad_token_id
+        self.dataset_kwargs = dataset_kwargs
+        dataset_kwargs.update(
+            {"add_prefix_space": True}
+            if isinstance(self.tokenizer, BartTokenizer)
+            else {}
+        )
+
+    def __len__(self):
+        return len(self.inputs)
+
+    def __getitem__(self, index):
+        source = 1
+        category = 16
+        input = self.prefix + self.inputs[index]
+        index = index + 1
+        return {
+            "tgt_texts": input,
+            "src_texts": input,
+            "id": 0,
+            "category": category,
+            "source": source,
+            }
+
+    def collate_fn(self, batch):
+        """Call prepare_seq2seq_batch."""
+        batch_encoding: Dict[str, torch.Tensor] = self.tokenizer.prepare_seq2seq_batch(
+            [x["src_texts"] for x in batch],
+            tgt_texts=[x["tgt_texts"] for x in batch],
+            max_length=self.max_source_length,
+            max_target_length=self.max_target_length,
+            return_tensors="pt",
+            **self.dataset_kwargs,
+        ).data
         batch_encoding["ids"] = torch.tensor([x["id"] for x in batch])
         batch_encoding["cats"] = torch.tensor([x["category"] for x in batch])
         batch_encoding["sources"] = torch.tensor([x["source"] for x in batch])
@@ -400,10 +458,11 @@ def eval_meteor_test_webnlg(folder_data, pred_file, dataset):
         + "/meteor-1.5.jar "
         + pred_file
         + " "
-        + folder_data
-        + "/"
+#        + folder_data
+#        + "/"
         + dataset
-        + ".target_eval_meteor -l en -norm -r 3 > "
+#        + ".target_eval_meteor -l en -norm -r 3 > "
+        + " -l en -norm > "
         + pred_file.replace("txt", "meteor")
     )
     print(cmd_string)
@@ -425,10 +484,11 @@ def eval_chrf_test_webnlg(folder_data, pred_file, dataset):
         + "/chrf++.py -H "
         + pred_file
         + " -R "
-        + folder_data
-        + "/"
+#        + folder_data
+#        + "/"
         + dataset
-        + ".target_eval_crf > "
+#        + ".target_eval_crf > "
+        + " > "
         + pred_file.replace("txt", "chrf")
     )
 

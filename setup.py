@@ -28,7 +28,7 @@ setup(
         "sentencepiece==0.1.91",
         "tensorboard",
         "tensorflow==2.5.0",
-        "torchvision==0.8.2",
+        "torchvision==0.8.2+cu110",
         "typing==3.7.4.3",
         "gitpython",
         "rouge_score",
@@ -36,7 +36,7 @@ setup(
         "wandb",
         "transformers @ git+https://github.com/m-chanakya/transformers.git@controlprefixes",
         "torchtext==0.8.1",
-        "torch==1.7.1"
+        "torch==1.7.1+cu110"
     ],
     packages=['datatotext'],
     package_dir={'datatotext': 'src/datatotext'},
